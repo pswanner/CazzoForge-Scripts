@@ -451,6 +451,13 @@ namespace InfServer.Script.GameType_Multi
             if (player.findSkill(201) != null)
                 player._skills.Remove(201);
 
+            //Add the skill!
+            if (player.findSkill(203) != null)
+                player._skills.Remove(203);
+            //Add the skill!
+            if (player.findSkill(202) != null)
+                player._skills.Remove(202);
+
         }
 
         public void playerLeaveArena(Player player)
@@ -479,6 +486,17 @@ namespace InfServer.Script.GameType_Multi
         }
         #endregion
 
+        #region Command Handlers
+        public bool playerModcommand(Player player, Player recipient, string command, string payload)
+        {
+            return true;
+        }
+
+        public bool playerChatCommand(Player player, Player recipient, string command, string payload)
+        {
+            return true;
+        }
+        #endregion
 
         #region Updation Calls
 
@@ -588,3 +606,4 @@ namespace InfServer.Script.GameType_Multi
     }
 }
 #endregion
+

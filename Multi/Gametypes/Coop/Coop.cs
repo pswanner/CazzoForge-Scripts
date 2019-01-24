@@ -445,9 +445,18 @@ namespace InfServer.Script.GameType_Multi
             //Obtain the Co-Op skill..
             SkillInfo coopskillInfo = _arena._server._assets.getSkillByID(200);
 
+
+
             //Add the skill!
             if (player.findSkill(200) == null)
             player.skillModify(coopskillInfo, 1);
+
+            //Add the skill!
+            if (player.findSkill(203) != null)
+                player._skills.Remove(203);
+            //Add the skill!
+            if (player.findSkill(202) != null)
+                player._skills.Remove(202);
 
             if (_botDifficulty <= 6)
             {
@@ -521,6 +530,17 @@ namespace InfServer.Script.GameType_Multi
         }
         #endregion
 
+        #region Command Handlers
+        public bool playerModcommand(Player player, Player recipient, string command, string payload)
+        {
+            return true;
+        }
+
+        public bool playerChatCommand(Player player, Player recipient, string command, string payload)
+        {
+            return true;
+        }
+        #endregion
 
         #region Updation Calls
         /// <summary>

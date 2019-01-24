@@ -30,10 +30,12 @@ namespace InfServer.Script.GameType_Multi
         private int _tickGameLastTickerUpdate;  //The tick at which the ticker was last updated
         private int _lastGameCheck;				//The tick at which we last checked for game viability
         private int _tickGameStarting;			//The tick at which the game began starting (0 == not initiated)
-        private int _tickGameStart;				//The tick at which the game started (0 == stopped)
+        public int _tickGameStart;				//The tick at which the game started (0 == stopped)
         private int _tickLastShrink;
+        private int _tickLastReadyCheck;
 
         private List<Team> _activeTeams;
+        private Dictionary<string, bool> _playersReady;
 
         //Settings
         public bool bClassic;
@@ -74,6 +76,10 @@ namespace InfServer.Script.GameType_Multi
             _blue = _arena.getTeamByName("Blue");
             _rand = new Random();
             _activeTeams = new List<Team>();
+            _playersReady = new Dictionary<string, bool>();
+            _tickLastReadyCheck = 0;
+            _tickGameStarting = 0; //test
+
             manualTeamSizePick = 0;
             bClassic = false; // Turn on looting.
             bGameLocked = true;
@@ -97,32 +103,12 @@ namespace InfServer.Script.GameType_Multi
 
             if (_arena._bGameRunning)
             {
-                if (now - _tickLastShrink >= 30000)
-                {
-                    short shrinkAmount = (short)((_storm.Width + _storm.Height) * 0.25);
 
-                    if (_storm.Width < _storm.Height) 
-                        _storm.Shrink(shrinkAmount, true);
-                    else 
-                        _storm.Shrink(shrinkAmount, false);
 
-                    _tickLastShrink = now;
-
-                    _arena.setTicker(1, 3, 30 * 100, "Play area shrinking in: ");
-                }
                 _storm.Poll(now);
 
-                foreach (Player player in _arena.PlayersIngame)
-                {
-                    if (player._team._name == "Red" || player._team._name == "Blue")
-                        continue;
-
-                    if (!player.inArea(_storm._left, _storm._top, _storm._right, _storm._bottom) && now - _baseScript._tickGameStarted >= 5000)
-                            player.heal(oobEffect, player);
-                }
-                
                 //Check win conditions
-                checkForwinner();
+                checkForwinner(now);
             }
 
             //Update our tickers
@@ -174,10 +160,7 @@ namespace InfServer.Script.GameType_Multi
             }
             if (_baseScript._tickGameStarting > 0 && now - _baseScript._tickGameStarting > 15000)
             {
-                if (bAllPlayersReady)
-                    _arena.gameStart();
-                else if (now - _baseScript._tickGameStarting > 30000)
-                    _arena.gameStart();
+
             }
 
                 return true;
@@ -188,8 +171,12 @@ namespace InfServer.Script.GameType_Multi
 
 
             foreach (Player player in _arena.PlayersIngame)
+            {
                 if (player._team._name == "Red" || player._team._name == "Blue")
-                    pickTeam(player);
+                    pickTeam(player);             
+            }
+
+
 
             List<int> teamSizePickList = new List<int>();
             int playersToConsider = _arena.PlayerCount; // later adjust this for private teams.
@@ -228,6 +215,7 @@ namespace InfServer.Script.GameType_Multi
 
             Random randTeamSizePick = new Random();
 
+
             int teamSizePick = teamSizePickList[randTeamSizePick.Next(teamSizePickList.Count)];
             _playersPerTeam = teamSizePick;
 
@@ -249,7 +237,7 @@ namespace InfServer.Script.GameType_Multi
             //_baseScript.AllowPrivateTeams(true);
         }
 
-        public void checkForwinner()
+        public void checkForwinner(int now)
         {
             List<Team> removes = _activeTeams.Where(t => t.ActivePlayerCount == 0).ToList();
 
@@ -257,8 +245,28 @@ namespace InfServer.Script.GameType_Multi
                 if (_activeTeams.Contains(team))
                     _activeTeams.Remove(team);
 
-            int teamCount = _activeTeams.Count;
+            List<Team> removes2 = new List<Team>();
 
+            foreach (Team team in _activeTeams)
+            {
+                int teamAlivePlayerCount = team.ActivePlayerCount;
+                foreach (Player player in team.ActivePlayers)
+                {
+                    if (player.IsDead)
+                    {
+                        teamAlivePlayerCount--;
+                    }
+
+                }
+                if (teamAlivePlayerCount == 0)
+                    removes2.Add(team);
+            }
+
+            foreach (Team team in removes2)
+                if (_activeTeams.Contains(team))
+                    _activeTeams.Remove(team);
+
+            int teamCount = _activeTeams.Count;
             if (teamCount == 1)
             {
                 _victoryTeam = _activeTeams.First();
@@ -270,10 +278,149 @@ namespace InfServer.Script.GameType_Multi
                     _arena.sendArenaMessage(String.Format("{0} has won!", _victoryTeam._name));
 
 
-                _baseScript.bJackpot = true;
+                _baseScript.bJackpot = false;
+
+                int gameLength = 0;
+                int fixedJackpot = 2000;
+                gameLength = (now - _tickGameStart) / 1000;
+
+                double jackpot = _arena.TotalPlayerCount * 500;
+                jackpot += (gameLength * 50);
+                jackpot += fixedJackpot;
+
+                int bonusCash = 0;
+                int bonusExp = 0;
+                int bonusPoints = 0;
+
+                foreach (Player player in _arena.Players)
+                {
+                    if (_baseScript.StatsCurrent(player).hasPlayed)
+                    {
+                        if (_victoryTeam != null)
+                        {
+                            if (player._team._name == _victoryTeam._name)
+                            {
+                                bonusCash = Convert.ToInt32(jackpot * 0.5);
+                                bonusExp = Convert.ToInt32(jackpot * 1);
+                                bonusPoints = Convert.ToInt32(jackpot * 1);
+                            }
+                            else
+                            {
+                                bonusCash = Convert.ToInt32((jackpot * 0.5) / 4);
+                                bonusExp = Convert.ToInt32((jackpot * 1) / 4);
+                                bonusPoints = Convert.ToInt32((jackpot * 1) / 4);
+                            }
+                        }
+                        else
+                        {
+                            bonusCash = Convert.ToInt32((jackpot * 0.5) / 4);
+                            bonusExp = Convert.ToInt32((jackpot * 1) / 4);
+                            bonusPoints = Convert.ToInt32((jackpot * 1) / 4);
+                        }
+
+                        player.sendMessage(0, String.Format("Tournament Bonus: (Points={2} Cash={0} Experience={1} )", bonusCash, bonusExp, bonusPoints));
+                        player.Cash += bonusCash;
+                        player.Experience += bonusExp;
+                        player.BonusPoints += bonusPoints;
+                        player.syncState();
+                    }
+                    
+
+
+                }
+                _arena.gameEnd();
+            }
+            if (teamCount == 0)  //What about a tie?
+            {
+                _victoryTeam = null;
+                _baseScript._winner = null;
+
+                if (_victoryTeam == null)
+                    _arena.sendArenaMessage("There was no winner");
+
+                _baseScript.bJackpot = false;
+
+                int gameLength = 0;
+                int fixedJackpot = 2000;
+                gameLength = (now - _tickGameStart) / 1000;
+
+                double jackpot = _arena.TotalPlayerCount * 500;
+                jackpot += (gameLength * 50);
+                jackpot += fixedJackpot;
+
+                int bonusCash = 0;
+                int bonusExp = 0;
+                int bonusPoints = 0;
+
+                foreach (Player player in _arena.Players)
+                {
+                    if (_baseScript.StatsCurrent(player).hasPlayed)
+                    {
+                        if (_victoryTeam != null)
+                        {
+                            if (player._team._name == _victoryTeam._name)
+                            {
+                                bonusCash = Convert.ToInt32(jackpot * 0.5);
+                                bonusExp = Convert.ToInt32(jackpot * 1);
+                                bonusPoints = Convert.ToInt32(jackpot * 1);
+                            }
+                            else
+                            {
+                                bonusCash = Convert.ToInt32((jackpot * 0.5) / 4);
+                                bonusExp = Convert.ToInt32((jackpot * 1) / 4);
+                                bonusPoints = Convert.ToInt32((jackpot * 1) / 4);
+                            }
+                        }
+                        else
+                        {
+                            bonusCash = Convert.ToInt32((jackpot * 0.5) / 4);
+                            bonusExp = Convert.ToInt32((jackpot * 1) / 4);
+                            bonusPoints = Convert.ToInt32((jackpot * 1) / 4);
+                        }
+
+                        player.sendMessage(0, String.Format("Tournament Bonus: (Points={2} Cash={0} Experience={1} )", bonusCash, bonusExp, bonusPoints));
+                        player.Cash += bonusCash;
+                        player.Experience += bonusExp;
+                        player.BonusPoints += bonusPoints;
+                        player.syncState();
+                    }
+
+
+
+                }
                 _arena.gameEnd();
             }
         }
+
+        public bool checkForAllPlayersReady()
+        {
+            foreach (Player player in _arena.PlayersIngame)
+            {
+                if (player._team._name == "Red" || player._team._name == "Blue" || player._team._name == "spec")
+                    continue;
+
+                if (_playersReady.ContainsKey(player._alias))
+                {
+                    if (_playersReady[player._alias])
+                    {
+                        continue;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    _playersReady[player._alias] = false;
+                    return false;
+                }
+
+            }
+            _playersReady.Clear();
+            return true;
+        }
+
         #region Events
 
         /// <summary>
@@ -310,6 +457,7 @@ namespace InfServer.Script.GameType_Multi
         /// </summary>
         public void playerEnter(Player player)
         {
+
         }
 
         /// <summary>
@@ -338,6 +486,7 @@ namespace InfServer.Script.GameType_Multi
         {	//We've started!
             _tickGameStart = Environment.TickCount;
             _tickGameStarting = 0;
+            _tickLastReadyCheck = 0;
             _tickLastShrink = Environment.TickCount;
             _victoryTeam = null;
             //_baseScript.AllowPrivateTeams(false); Re-enable when private teams are allowed.
@@ -356,10 +505,10 @@ namespace InfServer.Script.GameType_Multi
                 _arena.sendArenaMessage("Game has started!", 1);
 
             List<short> spawnPoints = new List<short>();
-            short maxLeft = 504;
-            short maxRight = 32168;
+            short maxLeft = 1920;
+            short maxRight = 30832;
             short center = 16488;
-            short separation = 1500;
+            short separation = 3000; //previously 1500
             short current = 0;
 
             int teamCountSansRedBlue = _arena.ActiveTeams.Count();
@@ -398,6 +547,10 @@ namespace InfServer.Script.GameType_Multi
                         player.skillModify(true, _classSkill, 1);
                     }
                     player.warp(pX, pY);
+                    player.inventoryModify(203, 2);
+
+                    if (player.Bounty < 1000)
+                    player.Bounty = 1000;
                 }
 
                 spawnPoints.Add(current);
@@ -406,9 +559,6 @@ namespace InfServer.Script.GameType_Multi
                 current += separation;
             }
 
-            //Start up the storm!
-            _storm = new Boundary(_arena, 104, 3624, (short)(spawnPoints.Last() + 800), (short)(spawnPoints.First() - 800));
-            _arena.setTicker(1, 3, 30 * 100, "Play area shrinking in: ");
 
             //Clear flags
             _arena.flagReset();
@@ -433,9 +583,9 @@ namespace InfServer.Script.GameType_Multi
         {	//Game finished, perhaps start a new one
             _gameCount = _gameCount + 1;
             _arena.sendArenaMessage("Game Over");
-
             _tickGameStart = 0;
             _tickGameStarting = 0;
+            _tickLastReadyCheck = 0;
             _victoryTeam = null;
 
             bGameLocked = false;
@@ -444,6 +594,9 @@ namespace InfServer.Script.GameType_Multi
 
             foreach (Player player in _arena.Players)
             {
+                if (!player.IsDead && !player.IsSpectator)
+                    player.warp(1924*16, 347*16);
+
                 foreach (ItemInfo item in removes)
                     if (player.getInventoryAmount(item.id) > 0)
                         player.removeAllItemFromInventory(item.id);
@@ -461,6 +614,7 @@ namespace InfServer.Script.GameType_Multi
                     continue;
 
                 player.unspec(player._team);
+                
             }
 
             return true;
@@ -500,42 +654,13 @@ namespace InfServer.Script.GameType_Multi
         {
             if (portal.GeneralData.Name.Contains("DS Portal"))
             {
-                Helpers.ObjectState flagPoint;
-                Helpers.ObjectState warpPoint;
-
-                flagPoint = _baseScript.findFlagWarp(player, false);
-
-                if (flagPoint == null)
+                if ((!_arena._bGameRunning) && (bGameLocked))
                 {
-                    Log.write(TLog.Normal, String.Format("Could not find suitable flag warp for {0}", player._alias));
+                    _playersReady[player._alias] = true;
 
-                    if (!_baseScript._lastSpawn.ContainsKey(player._alias))
-                    {
-                        player.sendMessage(-1, "Could not find suitable warp, warped to landing ship!");
-                        return true;
-                    }
-                    else
-                        warpPoint = _baseScript._lastSpawn[player._alias];
-                }
-                else
-                {
-                    warpPoint = _baseScript.findOpenWarp(player, _arena, flagPoint.positionX, 1744, _baseScript._playerWarpRadius);
+                    player.sendMessage(0, "You have marked yourself ready for the next game! Game will start early when all other players ready up.");
                 }
 
-                if (warpPoint == null)
-                {
-                    Log.write(TLog.Normal, String.Format("Could not find open warp for {0} (Warp Blocked)", player._alias));
-                    player.sendMessage(-1, "Warp was blocked, please try again");
-                    return false;
-                }
-
-                _baseScript.warp(player, warpPoint);
-
-                if (_baseScript._lastSpawn.ContainsKey(player._alias))
-                    _baseScript._lastSpawn[player._alias] = warpPoint;
-                else
-                    _baseScript._lastSpawn.Add(player._alias, warpPoint);
-                return false;
             }
             return false;
         }
@@ -551,7 +676,6 @@ namespace InfServer.Script.GameType_Multi
             if (_arena._bGameRunning && bDeath)
             {
                 player.spec("spec");
-                player.sendMessage(0, "You've been knocked out of the game, You may continue to play Red/Blue until the next game!");
 
                 if (player._team.ActivePlayerCount == 0)
                     _activeTeams.Remove(player._team);
@@ -621,7 +745,23 @@ namespace InfServer.Script.GameType_Multi
         /// </summary>
         /// <remarks>killer may be null if it wasn't a player kill</remarks>
         public bool playerDeath(Player victim, Player killer, Helpers.KillType killType, CS_VehicleDeath update)
-        {   
+        {
+
+            if (victim._team == _red || victim._team == _blue)
+                return true;
+
+            if (_arena._bGameRunning)
+            {
+                if (killer == null)
+                    _arena.sendArenaMessage(String.Format("{0} has been knocked out of the Tournament by the storm.", victim._alias));
+                else if (killer._alias == victim._alias)
+                    _arena.sendArenaMessage(String.Format("{0} has been knocked out of the Tournament by the storm.", victim._alias));
+                else
+                    _arena.sendArenaMessage(String.Format("{0} has been knocked out of the Tournament by {1}.", victim._alias, killer._alias));
+
+                victim.sendMessage(0, "You've been knocked out of the tournament, You may continue to play Red/Blue until the next game!");
+            }
+
             return true;
         }
 
@@ -658,6 +798,18 @@ namespace InfServer.Script.GameType_Multi
             return true;
         }
 
+        #endregion
+
+        #region Command Handlers
+        public bool playerModcommand(Player player, Player recipient, string command, string payload)
+        {
+            return true;
+        }
+
+        public bool playerChatCommand(Player player, Player recipient, string command, string payload)
+        {
+            return true;
+        }
         #endregion
 
         #region Private Routines
